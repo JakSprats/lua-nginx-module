@@ -228,6 +228,11 @@ ngx_http_lua_ngx_unique_socket_per_worker(lua_State *L)
         return 2;
     }
 
+    if (ngx_use_accept_mutex) {
+        return luaL_error(L, "unique_socket_per_worker only works with"
+                             " directive: 'accept_mutex off'");
+    }
+
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "ngx_http_lua_ngx_unique_socket_per_worker: path: %s", upath);
 
