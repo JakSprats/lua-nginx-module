@@ -174,6 +174,7 @@ __ngx_create_listening(ngx_conf_t *cf, void *sockaddr, socklen_t socklen)
 void
 overwrite_listening_elt(ngx_http_request_t *r, ngx_listening_t *ls,
                         struct sockaddr_un *naddr) {
+    char  text[NGX_SOCKADDR_STRLEN];
     // CLEANUP OLD FD & ADDR_TEXT
     int   ofd   = ls->fd;
     void *oadtd = ls->addr_text.data;
@@ -183,16 +184,8 @@ overwrite_listening_elt(ngx_http_request_t *r, ngx_listening_t *ls,
     ls->fd = -1;
     struct sockaddr_un *un = (struct sockaddr_un *)ls->sockaddr;
     strcpy(un->sun_path, naddr->sun_path);
-    int slen               = strlen(naddr->sun_path);
-    ls->addr_text.len      = slen + 5; // 5 for "unix:"
-    int mlen               = ls->addr_text.len + 1; // NULL terminator
-    ls->addr_text.data     = ngx_palloc(r->pool, mlen);
-    memcpy(ls->addr_text.data, "unix:", 5);
-    memcpy(ls->addr_text.data + 5, naddr->sun_path, slen);
-    ls->addr_text.data[(mlen - 1)] = '\0';
-
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "overwrite_listening_elt: add_text: %s", ls->addr_text.data);
+                  "overwrite_listening_elt: add_text: %s", naddr->sun_path);
 }
 
 static int
@@ -258,7 +251,7 @@ ngx_http_lua_ngx_unique_socket_per_worker(lua_State *L)
     char               *path    = un->sun_path;
     pid_t               pid     = getpid();
 
-    memcpy(&naddr, un, socklen);
+    ngx_memcpy(&naddr, un, socklen);
     snprintf(naddr.sun_path, 108, "%s_%u", path, pid);
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "unique_path: %s", naddr.sun_path);
