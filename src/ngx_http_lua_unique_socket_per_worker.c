@@ -173,7 +173,7 @@ __ngx_create_listening(ngx_conf_t *cf, void *sockaddr, socklen_t socklen)
 
 // NOTE: taken from core/ngx_connection.c ngx_close_listening_sockets
 static int
-__ngx_close_listening_sockets(ngx_http_request_t *r, ngx_listening_t *ls) {
+__ngx_close_listening_socket(ngx_http_request_t *r, ngx_listening_t *ls) {
     ngx_connection_t *c;
 
     c = ls->connection;
@@ -191,25 +191,26 @@ __ngx_close_listening_sockets(ngx_http_request_t *r, ngx_listening_t *ls) {
     }
 
     u_char *name  = ls->addr_text.data + sizeof("unix:") - 1;
-    ngx_delete_file(name); //NOTE: first process deletes, 2+ fail this call
+    ngx_delete_file(name); //NOTE: 1st process deletes file, 2nd+ fail this call
 
-    return NGX_OK
+    return NGX_OK;
 }
 
 static int
 overwrite_listening_elt(ngx_http_request_t *r, ngx_listening_t *ls,
                         struct sockaddr_un *naddr) {
-    char  text[NGX_SOCKADDR_STRLEN];
+    char text[NGX_SOCKADDR_STRLEN];
     // CLEANUP OLD FD
-    int ret = __ngx_close_listening_sockets(r, ls);
-    if (ret != NGX_OK) return ret;
+    if (__ngx_close_listening_socket(r, ls) == NGX_ERROR) {
+        return NGX_ERROR;
+    }
 
     ls->fd = (ngx_socket_t) -1;
 
     // OVERWRITE WITH NEW SOCKADDR.PATH
     struct sockaddr_un *un = (struct sockaddr_un *)ls->sockaddr;
     strcpy(un->sun_path, naddr->sun_path);
-
+    //ngx_cpystrn(un->sun_path, naddr->sun_path, strlen(naddr->sun_path));
     snprintf(text, NGX_SOCKADDR_STRLEN, "unix:%s", naddr->sun_path);
     ls->addr_text.len = strlen(text);
     int len = ls->addr_text.len + 1;
@@ -220,7 +221,7 @@ overwrite_listening_elt(ngx_http_request_t *r, ngx_listening_t *ls,
     ngx_memcpy(ls->addr_text.data, text, len); 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                   "overwrite_listening_elt: add_text: %s", naddr->sun_path);
-    return NGX_OK
+    return NGX_OK;
 }
 
 static int
@@ -300,7 +301,7 @@ ngx_http_lua_ngx_unique_socket_per_worker(lua_State *L)
     }
 
     int ret = overwrite_listening_elt(r, mls, &naddr);
-    if (ret != 0) {
+    if (ret != NGX_OK) {
         return luaL_error(L, "ngx.socket listen: overwrite_listening_elt");
     }
 
