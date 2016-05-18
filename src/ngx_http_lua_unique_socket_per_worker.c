@@ -173,7 +173,7 @@ __ngx_create_listening(ngx_conf_t *cf, void *sockaddr, socklen_t socklen)
 
 // NOTE: taken from core/ngx_connection.c ngx_close_listening_sockets
 static int
-__ngx_close_listening_socket(ngx_http_request_t *r, ngx_listening_t *ls) {
+__ngx_close_listening_socket(ngx_cycle_t *cycle, ngx_listening_t *ls) {
     ngx_connection_t *c;
 
     c = ls->connection;
@@ -182,8 +182,8 @@ __ngx_close_listening_socket(ngx_http_request_t *r, ngx_listening_t *ls) {
 
     c->fd = (ngx_socket_t) -1;
 
-    ngx_log_debug2(NGX_LOG_DEBUG_CORE, r->connection->log, 0,
-                  "__ngx_close_listening_sockets listening %V #%d ",
+    ngx_log_debug2(NGX_LOG_DEBUG_CORE, cycle->log, 0,
+                  "unique_socket_per_worker: listening %V #%d ",
                   &ls->addr_text, ls->fd);
 
     if (ngx_close_socket(ls->fd) == -1) {
@@ -197,11 +197,11 @@ __ngx_close_listening_socket(ngx_http_request_t *r, ngx_listening_t *ls) {
 }
 
 static int
-overwrite_listening_elt(ngx_http_request_t *r, ngx_listening_t *ls,
+overwrite_listening_elt(ngx_cycle_t *cycle, ngx_listening_t *ls,
                         struct sockaddr_un *naddr) {
     char text[NGX_SOCKADDR_STRLEN];
     // CLEANUP OLD FD
-    if (__ngx_close_listening_socket(r, ls) == NGX_ERROR) {
+    if (__ngx_close_listening_socket(cycle, ls) == NGX_ERROR) {
         return NGX_ERROR;
     }
 
@@ -210,17 +210,16 @@ overwrite_listening_elt(ngx_http_request_t *r, ngx_listening_t *ls,
     // OVERWRITE WITH NEW SOCKADDR.PATH
     struct sockaddr_un *un = (struct sockaddr_un *)ls->sockaddr;
     strcpy(un->sun_path, naddr->sun_path);
-    //ngx_cpystrn(un->sun_path, naddr->sun_path, strlen(naddr->sun_path));
     snprintf(text, NGX_SOCKADDR_STRLEN, "unix:%s", naddr->sun_path);
     ls->addr_text.len = strlen(text);
     int len = ls->addr_text.len + 1;
-    ls->addr_text.data = ngx_palloc(r->pool, len);
+    ls->addr_text.data = ngx_palloc(cycle->pool, len);
     if (ls->addr_text.data == NULL) {
       return NGX_ERROR;
     }
     ngx_memcpy(ls->addr_text.data, text, len); 
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "overwrite_listening_elt: add_text: %s", naddr->sun_path);
+    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, cycle->log, 0,
+                  "unique_socket_per_worker: unique path: %s", naddr->sun_path);
     return NGX_OK;
 }
 
@@ -263,7 +262,7 @@ ngx_http_lua_ngx_unique_socket_per_worker(lua_State *L)
     }
 
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "ngx_http_lua_ngx_unique_socket_per_worker: path: %s", upath);
+                  "unique_socket_per_worker: replace-path: %s", upath);
 
     ngx_http_core_loc_conf_t *clcf;
     clcf            = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
@@ -275,7 +274,7 @@ ngx_http_lua_ngx_unique_socket_per_worker(lua_State *L)
     ngx_listening_t *mls    = &(ols[melt]);
     if (melt == -1) {
         lua_pushnil(L);
-        lua_pushliteral(L, "server not listening on path");
+        lua_pushliteral(L, "server not listening on replace-path");
         return 2;
     }
 
@@ -289,20 +288,18 @@ ngx_http_lua_ngx_unique_socket_per_worker(lua_State *L)
 
     ngx_memcpy(&naddr, un, socklen);
     snprintf(naddr.sun_path, 108, "%s%u", path, pid);
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-                  "unique_path: %s", naddr.sun_path);
 
     ngx_conf_t cf;
     cf.pool = cycle->pool;
     ngx_listening_t *ls;
     ls = __ngx_create_listening(&cf, (struct sockaddr *)&naddr, socklen);
     if (ls == NULL) {
-        return luaL_error(L, "ngx.socket listen: __ngx_create_listening");
+        return luaL_error(L, "unique_socket_per_worker: CREATE failed");
     }
 
-    int ret = overwrite_listening_elt(r, mls, &naddr);
+    int ret = overwrite_listening_elt(cycle, mls, &naddr);
     if (ret != NGX_OK) {
-        return luaL_error(L, "ngx.socket listen: overwrite_listening_elt");
+        return luaL_error(L, "unique_socket_per_worker: OVERWRITE failed");
     }
 
     ls->logp        = clcf->error_log;
@@ -312,11 +309,11 @@ ngx_http_lua_ngx_unique_socket_per_worker(lua_State *L)
     ls->handler     = ngx_http_init_connection;
 
     if (ngx_open_listening_sockets(cycle) != NGX_OK) {
-        return luaL_error(L, "ngx.socket listen: ngx_open_listening_sockets");
+        return luaL_error(L, "unique_socket_per_worker: LISTEN failed");
     }
 
     if (__ngx_event_process_init(r, cycle, mls) == NGX_ERROR) {
-        return luaL_error(L, "ngx.socket listen: __ngx_event_process_init");
+        return luaL_error(L, "unique_socket_per_worker: ADD-EVENT failed");
     }
 
     debug_elts(r, ols, onelts);
