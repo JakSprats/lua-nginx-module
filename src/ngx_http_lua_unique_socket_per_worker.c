@@ -22,9 +22,10 @@
 
 static void debug_elts(ngx_http_request_t *r, ngx_listening_t *ls, int nelts) {
 #ifdef DEBUG_ELTS
+    int i;
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "START: DEBUG_ELTS: N(%d)", nelts);
-    for (int i = 0; i < nelts; i++) {
+    for (i = 0; i < nelts; i++) {
       int              fd = ls[i].fd;
       struct sockaddr *an = ls[i].sockaddr;
       if (an->sa_family == AF_INET) {
@@ -45,8 +46,9 @@ static void debug_elts(ngx_http_request_t *r, ngx_listening_t *ls, int nelts) {
 
 static int
 get_listening_socket_elt(ngx_listening_t *ls, int nelts, u_char *upath) {
+    int i;
     size_t ulen = strlen((char *)upath);
-    for (int i = 0; i < nelts; i++) {
+    for (i = 0; i < nelts; i++) {
         size_t alen  = ls[i].addr_text.len;
         if (alen == ulen) {
             char *atext = (char *)ls[i].addr_text.data;
